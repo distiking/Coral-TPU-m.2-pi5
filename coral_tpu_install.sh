@@ -14,30 +14,30 @@ prepare_config(){
 
 prepare_device_tree(){
     sudo cp /boot/firmware/bcm2712-rpi-5-b.dtb /boot/firmware/bcm2712-rpi-5-b.dtb.bak
-    sudo dtc -I dtb -O dts /boot/firmware/bcm2712-rpi-5-b.dtb -o ~/test.dts
-    sudo sed -i '/pcie@110000 {/,/msi-parent = <0x2[fc]>;/{s/<0x2f>/<0x67>/; s/<0x2c>/<0x67>/}' ~/test.dts
-    sudo dtc -I dts -O dtb ~/test.dts -o ~/test.dtb
-    sudo mv ~/test.dtb /boot/firmware/bcm2712-rpi-5-b.dtb
+    sudo dtc -I dtb -O dts /boot/firmware/bcm2712-rpi-5-b.dtb -o ~/dev_tree.dts
+    sudo sed -i '/pcie@110000 {/,/msi-parent = <0x2[fc]>;/{s/<0x2f>/<0x67>/; s/<0x2c>/<0x67>/}' ~/dev_tree.dts
+    sudo dtc -I dts -O dtb ~/dev_tree.dts -o ~/dev_tree.dtb
+    sudo mv ~/dev_tree.dtb /boot/firmware/bcm2712-rpi-5-b.dtb
 }
 
 install_packages(){
     sudo apt-get update
     sudo apt-upgrade -y
-    sudo apt install -y libcap-dev libatlas-base-dev ffmpeg libopenjp2-7 libedgetpu1-std
-    sudo apt install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev wget libcamera-dev
-    sudo apt install -y libkms++-dev libfmt-dev libdrm-dev
-    sudo apt-get install -y curl wget
+    sudo apt install -y libcap-dev libatlas-base-dev ffmpeg libopenjp2-7 libedgetpu1-std curl wget
+    sudo apt install -y build-essential zlib1g-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev liblzma-dev libffi-dev tk-dev libjpeg-dev libtiff-dev libwebp-dev libbz2-dev libnss3-dev libssl-dev libreadline-dev libffi-dev wget libcamera-dev
+    sudo apt install -y libkms++-dev libfmt-dev libdrm-dev libjpeg-dev libtiff-dev libwebp-dev
 }
 
-install_gasket(){
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+install_driver(){
+
     echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
-    OUTPUT=$(sudo apt-get install -y gasket-dkms 2>&1)
-    EXIT_STATUS=$?
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
     sudo apt update
-    sudo apt install -y libedgetpu1-std
+    OUTPUT=$(sudo apt-get install -y gasket-dkms libedgetpu1-std 2>&1)
+    EXIT_STATUS=$?
+    
     if [[ $EXIT_STATUS -ne 0 ]]; then
-        echo "dkms install failed. Running error script..."
+        echo "\033[33mdkms installation failed. Running error script...\033[0m"
         FILE="/usr/src/gasket-1.0/gasket_core.c"
         LINE_NUMBER=1841
         EXPECTED_VALUE="class_create(driver_desc->module, driver_desc->name);"
@@ -47,12 +47,19 @@ install_gasket(){
         if [[ "$LINE" != "$EXPECTED_VALUE" ]]; then
             sudo sed -i "${LINE_NUMBER}s/.*/${NEW_VALUE}/" "$FILE"
             sudo apt-get install -y gasket-dkms
-        else
-            echo "Installation failed."
+            OUTPUT=$(sudo apt-get install -y gasket-dkms 2>&1)
+            EXIT_STATUS=$?
+
+            if [[ $EXIT_STATUS -ne 0 ]]; then
+                read -p "Installation failed."
+                exit 1
+            fi
+	else
+            read -p  "Failed to install driver."
             exit 1
         fi
     fi
-
+    echo " Driver installation complete"
     sudo sh -c "echo 'SUBSYSTEM==\"apex\", MODE=\"0660\", GROUP=\"apex\"' >> /etc/udev/rules.d/65-apex.rules"
     sudo groupadd apex
     sudo adduser $USER apex
@@ -77,7 +84,7 @@ install_python(){
 
 install_pycoral(){
     cd ~
-
+	source coral_tpu_venv/bin/activate
     if [[ $(getconf LONG_BIT) == 64 ]]; then
         WHEEL_URL="https://github.com/google-coral/pycoral/releases/download/v2.0.0/tflite_runtime-2.5.0.post1-cp39-cp39-linux_aarch64.whl"
         PACKAGE_URL="https://github.com/google-coral/pycoral/releases/download/v2.0.0/pycoral-2.0.0-cp39-cp39-linux_aarch64.whl"
@@ -95,7 +102,7 @@ install_pycoral(){
     if [[ $? -eq 0 ]]; then
         echo "Tflite Runtime installed successfully."
     else
-        echo "Error: Failed to install Tflite Runtime package." && sleep 5
+        read -p "Error: Failed to install Tflite Runtime package."
         exit 1
     fi
 
@@ -105,9 +112,9 @@ install_pycoral(){
 
     pip3 install "$PACKAGE_URL"
     if [[ $? -eq 0 ]]; then
-        echo "pycoral package installed successfully."
+        echo "Pycoral package installed successfully."
     else
-        echo "Error: Failed to install pycoral package." && sleep 5
+        read -p  "Error: Failed to install pycoral package."
         exit 1
     fi
 
@@ -120,71 +127,142 @@ install_pycoral(){
 
 tpu_test(){
     cd ~
+    source coral_tpu_venv/bin/activate
+    image_path="$HOME/coral/pycoral/test_data/parrot.jpg"
 
-    image_path="/$HOME/pycoral/test_data/parrot.jpg"
-    git clone https://github.com/google-coral/pycoral.git
-    bash examples/install_requirements.sh classify_image.py
+    if [[ -n "$VIRTUAL_ENV" ]]; then
+        echo "You are currently in a virtual environment: $VIRTUAL_ENV"
 
-    clear
-
-    echo -e "\033[33m<<<<<<<<<<<<   Testing TPU   <<<<<<<<<<<<\033[0m" && sleep
-    view_image="python3 examples/classify_image.py \
-      --model test_data/mobilenet_v2_1.0_224_inat_bird_quant_edgetpu.tflite \
-      --labels test_data/inat_bird_labels.txt \
-      --input test_data/parrot.jpg"
-
-    eom "$image_path" &>/dev/null &
-    eom_pid=$!
-    eval "$view_image"
-
-    if [[ $? -eq 0 ]]; then
-        echo "Installation successfull."
+        if test -e "$image_path"; then
+            echo "Coral examples were installed."
+        else
+            echo "File does not exist"
+            mkdir -p "$HOME/coral"
+            cd "$HOME/coral"
+            git clone https://github.com/google-coral/pycoral.git
+            bash pycoral/examples/install_requirements.sh classify_image.py
+        fi
     else
-        echo "Error: Installation failed." && sleep 5
-        exit 1
+		clear
+        echo -e "\033[33mYou are not in virtual environment.\033[0m"
+        return
     fi
 
-    wait $eom_pid
+    clear
+    cd ~
+    echo -e "\033[33m<<<<<<<<<<<<   Testing TPU   <<<<<<<<<<<<\033[0m" && sleep 1
+    view_image="python3 coral/pycoral/examples/classify_image.py \
+      --model coral/pycoral/test_data/mobilenet_v2_1.0_224_inat_bird_quant_edgetpu.tflite \
+      --labels coral/pycoral/test_data/inat_bird_labels.txt \
+      --input coral/pycoral/test_data/parrot.jpg"
+
+    if [[ $? -eq 0 ]]; then
+        eval "$view_image"
+        eom "$image_path" &>/dev/null &
+		eom_pid=$!
+		echo "Installation successfull."
+        read -p "Press Enter to exit..."
+        kill $eom_pid
+        exit 0
+    else
+        read -p  "Error: Installation failed."
+        exit 1
+    fi
 }
 
 
 script_path="$(realpath "$0")"
 autostart_file="$HOME/.config/autostart/coral_setup.desktop"
 
+display_menu() {
+    echo "Coral TPU Setup Menu:"
+    echo "1. Run the complete setup script"
+    echo "2. Prepare config only"
+    echo "3. Prepare device tree only"
+    echo "4. Install driver (gasket) only"
+    echo "5. Install packages only"
+    echo "6. Install Python only"
+    echo "7. Install PyCoral only"
+    echo "8. Run TPU test only"
+    echo "9. Exit"
+    read -p "Enter your choice (1-9): " choice
+    echo
+}    
+
 if [[ "$1" == "--continue" ]]; then
     rm -f "$autostart_file"
-    echo -e "\033[33mCoral TPU Setup after reboot...\033[0m"
-
+    echo -e "\033[33mCoral TPU Setup after reboot. Please wait...\033[0m" && sleep 10
+    sudo modprobe apex
     output=$(lsmod | grep apex)
+
     if echo "$output" | grep -q "^apex" && echo "$output" | grep -q "^gasket"; then
-        echo -e "\033[33mapex and gasket modules are loaded succesfully.\033[0m"
-	echo "$output" && sleep 5
+        clear
+        echo -e "\033[33mapex and gasket modules are loaded successfully.\033[0m"
+        echo "$output" && sleep 5
     else
-        echo "Error: apex and/or gasket modules are not loaded."
-        read -p "Press Enter to exit..."
+        read -p  "Error: apex and/or gasket modules are not loaded."
         exit 1
     fi
-    
+    install_packages
     install_python
     install_pycoral
     tpu_test
-    echo "Coral TPU setup complete!"
-    read -p "Press Enter to exit..."
-    exit 0
+
 fi
 
-echo "Starting Coral TPU setup..."
-install_packages
-prepare_config
-prepare_device_tree
-install_gasket
-echo "Pre-reboot actions complete. Rebooting..."
-mkdir -p "$(dirname "$autostart_file")"
-cat > "$autostart_file" << EOL
+while true; do
+    display_menu
+    case $choice in
+        1)
+            echo "Running the complete setup script..."
+            prepare_config
+            prepare_device_tree
+            install_driver
+            echo "Pre-reboot actions complete. Rebooting..."
+            mkdir -p "$(dirname "$autostart_file")"
+            cat > "$autostart_file" << EOL
 [Desktop Entry]
 Type=Application
 Name=Coral TPU Setup
 Exec=lxterminal -e "$script_path" --continue
 Terminal=false
 EOL
-echo -e "\033[33mWarning: The system will reboot in 5 seconds and the installation will continue!\033[0m" && sleep 5 && sudo reboot
+            echo -e "\033[33mWarning: The system will reboot in 5 seconds and the installation will continue!\033[0m" && sleep 5 && sudo reboot
+            ;;
+        2)
+            echo "Preparing config..."
+            prepare_config
+            ;;
+        3)
+            echo "Preparing device tree..."
+            prepare_device_tree
+            ;;
+        4)
+            echo "Installing driver (gasket)..."
+            install_driver
+            ;;
+        5)
+            echo "Installing packages..."
+            install_packages
+            ;;
+        6)
+            echo "Installing Python..."
+            install_python
+            ;;
+        7)
+            echo "Installing PyCoral..."
+            install_pycoral
+            ;;
+        8)
+            echo "Running TPU test..."
+            tpu_test
+            ;;
+        9)
+            echo "Exiting..."
+            exit 0
+            ;;
+        *)
+            echo "Invalid choice. Please enter a number between 1 and 9."
+            ;;
+    esac
+done
