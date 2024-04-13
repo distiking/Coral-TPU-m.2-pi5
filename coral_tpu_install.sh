@@ -151,13 +151,14 @@ tpu_test(){
     clear
     cd ~
     echo -e "\033[33m<<<<<<<<<<<<   Testing TPU   <<<<<<<<<<<<\033[0m" && sleep 1
-    view_image="python3 coral/pycoral/examples/classify_image.py \
+    test_cmd="python3 coral/pycoral/examples/classify_image.py \
       --model coral/pycoral/test_data/mobilenet_v2_1.0_224_inat_bird_quant_edgetpu.tflite \
       --labels coral/pycoral/test_data/inat_bird_labels.txt \
       --input coral/pycoral/test_data/parrot.jpg"
-
+    
+    eval "$test_cmd"
     if [[ $? -eq 0 ]]; then
-        eval "$view_image"
+        
         eom "$image_path" &>/dev/null &
 		eom_pid=$!
 		echo "Installation successfull."
