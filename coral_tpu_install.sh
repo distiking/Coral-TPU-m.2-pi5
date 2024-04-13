@@ -132,7 +132,6 @@ tpu_test(){
 
     if [[ -n "$VIRTUAL_ENV" ]]; then
         echo "You are currently in a virtual environment: $VIRTUAL_ENV"
-
         if test -e "$image_path"; then
             echo "Coral examples were installed."
         else
