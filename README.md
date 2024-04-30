@@ -29,6 +29,6 @@ The installation process takes around 15-20 minutes. If everything goes well, yo
 Tested with:
 
     Raspberry Pi 5 4GB
-    Bookworm 64 (2025-03-15)
+    Bookworm 64 (2024-03-15)
 
 Last tested: 14/04/2024
